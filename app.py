@@ -7,7 +7,7 @@ from core.templates import setup_jinja_filters
 from pathlib import Path
 import os
 
-from proxy import proxy_router, ws_backend, ws_client
+from proxy import http_proxy_router, ws_client, ws_backend
 from main import frontend_router
 from core.templates import setup_jinja_filters
 
@@ -20,7 +20,7 @@ app.add_middleware(
 )
 
 # Routers
-app.include_router(proxy_router, prefix="/proxy")
+app.include_router(http_proxy_router, prefix="/proxy")
 app.include_router(frontend_router)
 app.include_router(dropbox_router)
 

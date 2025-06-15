@@ -1,0 +1,22 @@
+<div class="bg-white rounded-lg shadow-sm overflow-hidden
+            video-card cursor-pointer transition
+            ring-offset-2 ring-offset-white hover:ring hover:ring-blue-300"
+     data-bvid="{{ video.bvid }}">
+
+    <img src="{{ video.cover }}"
+         alt="{{ video.title }}"
+         referrerpolicy="no-referrer"
+         class="w-full h-40 object-cover">
+
+    <div class="p-3">
+        <h3 class="font-semibold text-gray-800 text-sm truncate mb-1"
+            title="{{ video.title }}">
+            {{ video.title }}
+        </h3>
+
+        <p class="text-gray-500 text-xs">
+            {{ video.duration | format_duration }} •
+            {{ video.pubtime   | timestamp_to_date }}
+        </p>
+    </div>
+</div>
