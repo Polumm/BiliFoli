@@ -2,131 +2,129 @@
 {% block title %}{{ title }}{% endblock %}
 
 {% block content %}
-<!-- ▸ Folder header -->
+<!-- ▸ folder header -->
 <div class="mb-6">
-    <h1 class="text-2xl font-bold text-gray-800 mb-2">
-        <i class="fas fa-folder-open mr-2 text-blue-500"></i> {{ folder_info.title }}
-    </h1>
-    <p class="text-gray-600">
-        {{ folder_info.intro or "No description available." }}
-    </p>
+  <h1 class="text-2xl font-bold text-gray-800 mb-2">
+    <i class="fas fa-folder-open mr-2 text-blue-500"></i> {{ folder_info.title }}
+  </h1>
+  <p class="text-gray-600">
+    {{ folder_info.intro or "No description available." }}
+  </p>
 </div>
 
-<!-- ▸ Sticky mini-player -->
+<!-- ▸ sticky mini-player -->
 {% include "components/mini_player.html" %}
 
-<!-- ▸ Video grid -->
+<!-- ▸ video grid -->
 <div id="videoGrid"
      class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-    {% for video in videos %}
-        {% include "components/_video_card.html" %}
-    {% endfor %}
+  {% for video in videos %}
+    {% include "components/_video_card.html" %}
+  {% endfor %}
 </div>
 
-<!-- ▸ Infinite-scroll sentinel & spinner -->
+<!-- ▸ infinite-scroll sentinel & spinner -->
 <div id="scrollSentinel" class="h-10"></div>
 <div id="spinner" class="flex justify-center py-6 hidden">
-    <svg class="animate-spin h-8 w-8 text-blue-500" viewBox="0 0 24 24">
-        <circle class="opacity-25" cx="12" cy="12" r="10"
-                stroke="currentColor" stroke-width="4" fill="none"></circle>
-        <path class="opacity-75" fill="currentColor"
-              d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
-    </svg>
+  <svg class="animate-spin h-8 w-8 text-blue-500" viewBox="0 0 24 24">
+    <circle class="opacity-25" cx="12" cy="12" r="10"
+            stroke="currentColor" stroke-width="4" fill="none"></circle>
+    <path class="opacity-75" fill="currentColor"
+          d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+  </svg>
 </div>
 {% endblock %}
 
 {% block extra_scripts %}
 <script>
-/* ────────────────────────────────────────────────────────
-   Helpers (added once, safe for multiple pages)
-   ──────────────────────────────────────────────────────── */
-window.format_duration     ||= s  => `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;
-window.timestamp_to_date   ||= ts => new Date(ts*1000).toISOString().split('T')[0];
-
-/* ────────────────────────────────────────────────────────
-   Page-specific logic
-   ──────────────────────────────────────────────────────── */
 (() => {
-    const grid      = document.getElementById('videoGrid');
-    const sentinel  = document.getElementById('scrollSentinel');
-    const spinner   = document.getElementById('spinner');
+  const grid      = document.getElementById('videoGrid');
+  const wrapper   = document.getElementById('miniPlayerWrapper');
+  const video     = document.getElementById('miniPlayerVideo');
+  const unmuteBtn = document.getElementById('unmuteOverlay');
 
-    /* ••• infinite-scroll state ••• */
-    let   page       = {{ current_page|default(1) }};
-    const totalPages = {{ total_pages }};
-    const pageSize   = {{ page_size }};
-    let   loading    = false;
+  /* Helper: try up to 3 times, falling back to lower qualities the server picks */
+  async function playStream(bvid, attempt = 0) {
+    try {
+      const r = await fetch(`/api/video/${bvid}/playurl`, { cache: 'no-store' });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const j = await r.json();
+      if (!j.url) throw new Error('empty URL');
 
-    async function loadMore () {
-        if (loading || page >= totalPages) return;
-        loading = true;
-        spinner.classList.remove('hidden');
-        io.unobserve(sentinel);                 // pause callbacks
+      video.src = j.url;
+      video.dataset.bvid = bvid;   // allow the mini‑player to retry itself
+      video.load();
+      await video.play();
+      unmuteBtn.classList.remove('hidden');
+    } catch (e) {
+      if (attempt < 2) return playStream(bvid, attempt + 1); // auto‑retry ×2
+      console.warn('playback failed:', e);
+      alert('⚠️ Unable to start this video. Try another one?');
+    }
+  }
 
-        try {
-            const nextPage = page + 1;
-            const res = await fetch(`/api/folder/{{ media_id }}?page=${nextPage}&page_size=${pageSize}`);
-            if (!res.ok) throw new Error('Network error');
-            const { data } = await res.json();
+  /* click on a card → start playback */
+  grid.addEventListener('click', ev => {
+    const card = ev.target.closest('[data-bvid]');
+    if (!card) return;
 
-            const html = data.videos.map(v => `
-                <div class="bg-white rounded-lg shadow-sm overflow-hidden
-                            video-card cursor-pointer transition
-                            ring-offset-2 ring-offset-white hover:ring hover:ring-blue-300"
-                     data-bvid="${v.bvid}">
-                    <img src="${v.cover}" referrerpolicy="no-referrer"
-                         class="w-full h-40 object-cover" alt="${v.title}">
-                    <div class="p-3">
-                        <h3 class="font-semibold text-gray-800 text-sm truncate mb-1"
-                            title="${v.title}">${v.title}</h3>
-                        <p class="text-gray-500 text-xs">
-                            ${window.format_duration(v.duration)} •
-                            ${window.timestamp_to_date(v.pubtime)}
-                        </p>
-                    </div>
-                </div>`).join('');
-            grid.insertAdjacentHTML('beforeend', html);
+    document.querySelectorAll('.video-card')
+            .forEach(el => el.classList.remove('ring', 'ring-blue-400'));
+    card.classList.add('ring', 'ring-blue-400');
 
-            page = nextPage;
-        } catch (err) {
-            console.error(err);
-        } finally {
-            loading = false;
-            spinner.classList.add('hidden');
-            if (page < totalPages) io.observe(sentinel); // resume
-        }
+    playStream(card.dataset.bvid);
+    wrapper.classList.remove('hidden');
+    if (window.innerWidth < 768) wrapper.scrollIntoView({ behavior: 'smooth' });
+  });
+
+  /* external retry request (fired from mini_player.html) */
+  document.addEventListener('video‑retry', e => playStream(e.detail, 1));
+
+  /* ——— infinite‑scroll (unchanged except stronger error checks) ——— */
+  const sentinel   = document.getElementById('scrollSentinel');
+  const spinner    = document.getElementById('spinner');
+  let   page       = {{ current_page }};
+  const totalPages = {{ total_pages }};
+  const pageSize   = {{ page_size }};
+  let   busy       = false;
+
+  const io = new IntersectionObserver(([entry]) => {
+    if (entry.isIntersecting) loadMore();
+  }, { rootMargin: '0px 0px 600px 0px' });
+  io.observe(sentinel);
+
+  async function loadMore() {
+    if (busy || page >= totalPages) return;
+    busy = true;
+    spinner.classList.remove('hidden');
+    io.unobserve(sentinel);
+
+    try {
+      const r = await fetch(`/api/folder/{{ media_id }}?page=${page + 1}&page_size=${pageSize}`);
+      if (!r.ok) throw new Error(r.status);
+      const j = await r.json();
+      const html = j.data.videos.map(v => `
+        <div class="bg-white rounded-lg shadow-sm overflow-hidden
+                    video-card cursor-pointer transition
+                    ring-offset-2 ring-offset-white hover:ring hover:ring-blue-300"
+             data-bvid="${v.bvid}">
+          <img src="${v.cover}" referrerpolicy="no-referrer"
+               class="w-full h-40 object-cover" alt="${v.title}">
+          <div class="p-3">
+            <h3 class="font-semibold text-gray-800 text-sm truncate mb-1" title="${v.title}">${v.title}</h3>
+            <p class="text-gray-500 text-xs">${window.format_duration(v.duration)} • ${window.timestamp_to_date(v.pubtime)}</p>
+          </div>
+        </div>`).join('');
+      grid.insertAdjacentHTML('beforeend', html);
+      page += 1;
+    } catch (e) {
+      console.error('pagination failed:', e);
     }
 
-    /* IntersectionObserver – triggers before user hits the bottom */
-    const io = new IntersectionObserver(
-        ([entry]) => entry.isIntersecting && loadMore(),
-        { rootMargin: '0px 0px 600px 0px' }
-    );
+    spinner.classList.add('hidden');
+    busy = false;
     io.observe(sentinel);
-
-    /* Delegated click: play selected video in mini-player */
-    grid.addEventListener('click', async e => {
-        const card = e.target.closest('[data-bvid]');
-        if (!card) return;
-        try {
-            const r = await fetch(`/api/video/${card.dataset.bvid}/playurl`);
-            if (!r.ok)      return alert('Failed to fetch stream.');
-            const { url } = await r.json();
-            if (!url)       return alert('No playable URL returned.');
-
-            /* mini_player.html exposes this helper */
-            await window.__miniPlayerPlay(url, card);
-
-            /* Scroll into view on small screens */
-            if (window.innerWidth < 768) {
-                document.getElementById('miniPlayerWrapper')
-                        .scrollIntoView({ behavior:'smooth' });
-            }
-        } catch (err) {
-            console.error(err);
-            alert('Network error while requesting video.');
-        }
-    });
+  }
 })();
 </script>
 {% endblock %}
