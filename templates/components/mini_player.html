@@ -1,96 +1,71 @@
 <div id="miniPlayerWrapper"
-     class="w-full mb-8 hidden transition-all duration-300 ease-in-out relative">
+     class="sticky top-0 z-30 mb-8 hidden
+            transition-all duration-300 ease-in-out
+            bg-white/80 backdrop-blur pb-4">
 
-  <!-- VIDEO -->
+  <!-- video -->
   <video id="miniPlayerVideo"
-         preload="metadata"
-         muted
-         loop
-         playsinline webkit-playsinline
-         controls
+         preload="metadata" muted loop
+         playsinline webkit-playsinline controls
          x-webkit-airplay="allow"
-         class="w-full h-[460px] rounded-lg shadow-md bg-black">
-  </video>
+         class="w-full h-[460px] rounded-lg shadow-md bg-black"></video>
 
-  <!-- Tap-to-unmute overlay -->
+  <!-- tap-to-unmute overlay -->
   <button id="unmuteOverlay"
           class="absolute inset-0 flex items-center justify-center
                  text-white text-xl font-semibold bg-black/50
                  backdrop-blur-sm rounded-lg hidden">
-      🔊 Tap to unmute
+    🔊 Tap to unmute
   </button>
 
   <!-- PiP helper -->
-  <button id="pipBtn" class="mt-2 px-4 py-1 bg-blue-600 text-white rounded">
-      🎧 Play in background
+  <button id="pipBtn"
+          class="mt-2 px-4 py-1 bg-blue-600 text-white rounded">
+    🎧 Play in background
   </button>
 </div>
 
 <script>
 (() => {
-    const wrapper = document.getElementById('miniPlayerWrapper');
-    const video   = document.getElementById('miniPlayerVideo');
-    const unmute  = document.getElementById('unmuteOverlay');
-    const pipBtn  = document.getElementById('pipBtn');
+  const video   = document.getElementById('miniPlayerVideo');
+  const pipBtn  = document.getElementById('pipBtn');
+  const unmute  = document.getElementById('unmuteOverlay');
 
-    /* ── feature-detect PiP ──────────────────────────────────────────── */
-    if (!video.requestPictureInPicture &&
-        !video.webkitSetPresentationMode) {
-        pipBtn.classList.add('hidden');          // PiP unsupported
+  /* PiP feature‑test */
+  const pipOK = ('requestPictureInPicture' in video) ||
+                (video.webkitSupportsPresentationMode &&
+                 video.webkitSupportsPresentationMode('picture-in-picture'));
+  if (!pipOK) pipBtn.classList.add('hidden');
+
+  pipBtn.addEventListener('click', async () => {
+    try {
+      if (video.requestPictureInPicture) {
+        await video.requestPictureInPicture();
+      } else {
+        await video.webkitSetPresentationMode('picture-in-picture');
+      }
+      if (video.muted) video.muted = false;
+    } catch {}
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && !video.paused) {
+      video.play().catch(() => {});
     }
+  });
 
-    /* ── keep playing when tab regains focus ────────────────────────── */
-    document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible' && !video.paused) {
-            video.play().catch(() => {});
-        }
-    });
+  unmute.addEventListener('click', async () => {
+    video.pause();
+    video.muted = false;
+    unmute.classList.add('hidden');
+    await video.play().catch(() => {});
+  });
 
-    /* ── tap-to-unmute overlay ──────────────────────────────────────── */
-    function maybeShowUnmute () {
-        if (video.muted) unmute.classList.remove('hidden');
+  /* auto‑retry if the media pipeline throws */
+  video.addEventListener('error', () => {
+    if (video.dataset.bvid) {
+      document.dispatchEvent(new CustomEvent('video‑retry', { detail: video.dataset.bvid }));
     }
-    unmute.addEventListener('click', async () => {
-        video.pause();
-        video.muted = false;
-        unmute.classList.add('hidden');
-        await video.play().catch(()=>{});
-    });
-
-    /* ── PiP button ─────────────────────────────────────────────────── */
-    pipBtn.addEventListener('click', async () => {
-        try {
-            if (video.requestPictureInPicture) {
-                await video.requestPictureInPicture();
-            } else if (video.webkitSetPresentationMode) {
-                video.webkitSetPresentationMode('picture-in-picture');
-            }
-            if (video.muted) video.muted = false;
-            video.addEventListener('ended', () => {
-                video.currentTime = 0; video.play().catch(()=>{});
-            }, { once:true });
-        } catch {
-            alert('PiP not available on this device / iOS version.');
-        }
-    });
-
-    /* ── expose a tiny public helper used by pages ──────────────────── */
-    window.__miniPlayerPlay = async function (src, highlightCard) {
-        /* Bilibili’s CDN lacks CORS headers – drop the attribute
-           so Safari doesn’t block the request. */
-        video.removeAttribute('crossorigin');
-
-        video.pause();
-        video.src   = src;
-        video.muted = true;
-        await video.play().catch(()=>{});
-        maybeShowUnmute();
-
-        wrapper.classList.remove('hidden');
-
-        document.querySelectorAll('.video-card')
-                .forEach(el => el.classList.remove('ring','ring-blue-400'));
-        if (highlightCard) highlightCard.classList.add('ring','ring-blue-400');
-    };
+  });
 })();
 </script>
