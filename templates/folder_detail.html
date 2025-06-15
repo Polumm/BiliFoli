@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <h1 class="text-2xl font-bold text-gray-800 mb-2">
+        <i class="fas fa-folder-open mr-2 text-blue-500"></i> {{ folder_info.title }}
+    </h1>
+    <p class="text-gray-600">{{ folder_info.intro or "No description available." }}</p>
+</div>
+
+<!-- 🧩 Mini Player -->
+<div id="miniPlayerWrapper" class="w-full mb-8 hidden">
+    <video id="miniPlayer"
+           class="w-full h-[460px] rounded-lg shadow-md"
+           controls
+           playsinline
+           webkit-playsinline
+           preload="metadata"
+           poster=""
+           muted>
+        Your browser does not support the video tag.
+    </video>
+</div>
+
+<!-- 🎞️ Video Grid -->
+<div id="videoGrid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+    {% for video in videos %}
+    <div class="bg-white rounded-lg shadow-sm overflow-hidden video-card cursor-pointer"
+         data-bvid="{{ video.bvid }}">
+        <img src="{{ video.cover }}" alt="{{ video.title }}" referrerpolicy="no-referrer"
+             class="w-full h-40 object-cover">
+        <div class="p-3">
+            <h3 class="font-semibold text-gray-800 text-sm truncate mb-1">{{ video.title }}</h3>
+            <p class="text-gray-500 text-xs">{{ video.duration | format_duration }} • {{ video.pubtime | timestamp_to_date }}</p>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- 📄 Pagination -->
+{% if total_pages > 1 %}
+<div class="mt-8 flex justify-center items-center space-x-2">
+    {% for p in range(1, total_pages + 1) %}
+        {% if p == current_page %}
+            <span class="px-4 py-2 bg-blue-600 text-white rounded-md">{{ p }}</span>
+        {% else %}
+            <a href="/folder/{{ media_id }}?page={{ p }}&page_size={{ page_size }}"
+               class="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-blue-100">{{ p }}</a>
+        {% endif %}
+    {% endfor %}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+    const grid = document.getElementById('videoGrid');
+    const wrapper = document.getElementById('miniPlayerWrapper');
+    const player = document.getElementById('miniPlayer');
+
+    grid.addEventListener('click', async function (e) {
+        const card = e.target.closest('[data-bvid]');
+        if (!card) return;
+
+        const bvid = card.dataset.bvid;
+
+        // API call to fetch video URL
+        const resp = await fetch(`/api/video/${bvid}/playurl`);
+        if (!resp.ok) return alert('Failed to fetch video URL');
+        const { url } = await resp.json();
+
+        // Update player
+        wrapper.classList.remove('hidden');
+        player.src = url;
+        player.load();
+        try {
+            await player.play();
+        } catch (err) {
+            console.warn("Autoplay failed", err);
+        }
+
+        // Highlight active video
+        document.querySelectorAll('.video-card').forEach(el =>
+            el.classList.remove('ring', 'ring-blue-400')
+        );
+        card.classList.add('ring', 'ring-blue-400');
+
+        if (window.innerWidth < 768) {
+            wrapper.scrollIntoView({ behavior: 'smooth' });
+        }
+    });
+})();
+</script>
+{% endblock %}

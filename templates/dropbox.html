@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="max-w-4xl mx-auto py-10 px-6 font-['Inter']">
+    <div class="flex justify-between items-center mb-6">
+        <h1 class="text-3xl font-bold text-indigo-700">
+            <i class="fas fa-cloud-upload-alt mr-2"></i> Mini Dropbox
+        </h1>
+        <a href="/" class="text-sm text-indigo-500 hover:underline">← Back to Home</a>
+    </div>
+
+    <!-- Upload Form -->
+    <form action="/dropbox/upload" method="post" enctype="multipart/form-data" class="bg-white shadow rounded-lg p-6 border border-gray-200 mb-10">
+        <label for="file-upload" class="block text-gray-700 font-medium mb-2 text-lg">Select file to upload:</label>
+        <input type="file" name="file" id="file-upload" required class="block w-full mb-4 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-lg shadow-md transition duration-200">
+            Upload File
+        </button>
+    </form>
+
+    <!-- Error Message -->
+    {% if error %}
+        <div class="mb-4 text-red-600 bg-red-100 border border-red-300 rounded-lg p-3">
+            <strong>Error:</strong> {{ error }}
+        </div>
+    {% endif %}
+
+    <!-- File List -->
+    <div class="bg-white shadow rounded-lg p-6 border border-gray-200">
+        <h2 class="text-2xl font-semibold text-gray-800 mb-5">Stored Files</h2>
+
+        {% if files %}
+        <div class="overflow-x-auto">
+            <table class="min-w-full text-sm text-left border border-gray-200">
+                <thead class="bg-gray-100 text-xs uppercase text-gray-600">
+                    <tr>
+                        <th class="px-5 py-3">File Name</th>
+                        <th class="px-5 py-3">Size</th>
+                        <th class="px-5 py-3">Last Modified</th>
+                        <th class="px-5 py-3">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200">
+                    {% for f in files %}
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-5 py-3">{{ f.name }}</td>
+                        <td class="px-5 py-3">{{ (f.stat().st_size / 1024) | round(2) }} KB</td>
+                        <td class="px-5 py-3">{{ f.stat().st_mtime | timestamp_to_date }}</td>
+                        <td class="px-5 py-3">
+                            <div class="flex gap-3">
+                                <a href="/dropbox/download/{{ f.name | string | urlencode }}" class="text-green-600 hover:text-green-800 border border-green-600 px-3 py-1 rounded hover:border-green-800 transition">
+                                    Download
+                                </a>
+                                <form method="post" action="/dropbox/delete/{{ f.name | string | urlencode }}" onsubmit="return confirm('Delete {{ f.name }}?');">
+                                    <button type="submit" class="text-red-600 hover:text-red-800 border border-red-600 px-3 py-1 rounded hover:border-red-800 transition">
+                                        Delete
+                                    </button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+            <p class="text-gray-500 text-center">No files uploaded yet.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
