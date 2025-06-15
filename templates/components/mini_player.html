@@ -1,0 +1,122 @@
+<div id="miniPlayerWrapper" 
+     class="w-full mb-8 hidden transition-all duration-300 ease-in-out relative">
+
+  <!-- VIDEO -->
+  <video id="miniPlayerVideo"
+         autoplay
+         muted
+         loop
+         playsinline
+         webkit-playsinline
+         controls
+         x-webkit-airplay="allow"
+         disablepictureinpicture="false"
+         crossorigin="anonymous"
+         preload="metadata"
+         class="w-full h-[460px] rounded-lg shadow-md bg-black rounded-lg">
+      Your browser does not support HTML5 video.
+  </video>
+
+  <!-- Tap-to-unmute overlay -->
+  <button id="unmuteOverlay"
+          class="absolute inset-0 flex items-center justify-center
+                 text-white text-xl font-semibold bg-black/50
+                 backdrop-blur-sm rounded-lg hidden">
+      🔊 Tap to unmute
+  </button>
+
+  <!-- PiP Helper Button -->
+  <button id="pipBtn" class="mt-2 px-4 py-1 bg-blue-600 text-white rounded">
+      🎧 Play in background
+  </button>
+</div>
+
+<script>
+(function () {
+    const grid          = document.getElementById('videoGrid');
+    const wrapper       = document.getElementById('miniPlayerWrapper');
+    const video         = document.getElementById('miniPlayerVideo');
+    const unmuteOverlay = document.getElementById('unmuteOverlay');
+    const pipBtn        = document.getElementById('pipBtn');
+
+    function maybeShowUnmute() {
+        if (video.muted) {
+            unmuteOverlay.classList.remove('hidden');
+        }
+    }
+
+    // Resume playback when tab becomes visible again
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && !video.paused) {
+            video.play().catch(() => {});
+        }
+    });
+
+    unmuteOverlay.addEventListener('click', async () => {
+        video.pause();
+        video.muted = false;
+        video.removeAttribute('muted');
+        unmuteOverlay.classList.add('hidden');
+        await video.play().catch(() => {});
+    });
+
+    pipBtn.addEventListener('click', async () => {
+        try {
+            if (video.requestPictureInPicture) {
+                await video.requestPictureInPicture();
+            } else if (video.webkitSetPresentationMode) {
+                video.webkitSetPresentationMode('picture-in-picture');
+            }
+
+            if (video.muted) {
+                video.muted = false;
+                video.removeAttribute('muted');
+            }
+
+            video.addEventListener('ended', () => {
+                video.currentTime = 0;
+                video.play().catch(() => {});
+            }, { once: true });
+        } catch (err) {
+            console.error('Cannot enter PiP:', err);
+            alert('PiP not supported on this device / iOS version.');
+        }
+    });
+
+    grid.addEventListener('click', async (e) => {
+        const card = e.target.closest('[data-bvid]');
+        if (!card) return;
+
+        const bvid = card.dataset.bvid;
+
+        try {
+            const resp = await fetch(`/api/video/${bvid}/playurl`);
+            const data = await resp.json();
+
+            if (data.status !== 'success' || !data.url) {
+                alert('⚠️ Unable to load video stream.');
+                return;
+            }
+
+            video.src = data.url;
+            video.loop = true;
+            video.muted = true;
+            await video.play().catch(() => {});
+            maybeShowUnmute();
+
+            wrapper.classList.remove('hidden');
+            document.querySelectorAll('.video-card').forEach(el => {
+                el.classList.remove('ring', 'ring-blue-400');
+            });
+            card.classList.add('ring', 'ring-blue-400');
+
+            if (window.innerWidth < 768)
+                wrapper.scrollIntoView({behavior: 'smooth'});
+
+        } catch (err) {
+            console.error(err);
+            alert('🚫 Network error while requesting video.');
+        }
+    });
+})();
+</script>

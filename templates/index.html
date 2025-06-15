@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }} - Bilibili Favorite Manager{% endblock %}
+
+{% block content %}
+<div class="px-4 sm:px-0">
+    <!-- Header -->
+    <div class="bg-white overflow-hidden shadow rounded-lg mb-6">
+        <div class="px-4 py-5 sm:p-6">
+            <h1 class="text-3xl font-bold text-gray-900 mb-2">
+                <i class="fas fa-folder text-blue-500 mr-3"></i>
+                Your Favorite Folders
+            </h1>
+            <p class="text-gray-600">
+                Manage and browse your Bilibili favorite collections
+            </p>
+        </div>
+    </div>
+
+    <!-- Folders Grid -->
+    {% if folders %}
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+        {% for folder in folders %}
+        <div class="bg-white overflow-hidden shadow rounded-lg card-hover fade-in">
+            <a href="/folder/{{ folder.id }}" class="block">
+                <div class="p-6">
+                    <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center">
+                            <i class="fas fa-folder text-blue-500 text-xl mr-3"></i>
+                            <h3 class="text-lg font-semibold text-gray-900 truncate">
+                                {{ folder.title }}
+                            </h3>
+                        </div>
+                        {% if folder.fav_state == 1 %}
+                        <span class="bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full">
+                            <i class="fas fa-check mr-1"></i>
+                            Public
+                        </span>
+                        {% else %}
+                        <span class="bg-yellow-100 text-yellow-800 text-xs px-2 py-1 rounded-full">
+                            <i class="fas fa-lock mr-1"></i>
+                            Private
+                        </span>
+                        {% endif %}
+                    </div>
+                    
+                    <div class="flex items-center justify-between text-sm text-gray-500 mb-3">
+                        <span>
+                            <i class="fas fa-video mr-1"></i>
+                            {{ folder.media_count }} videos
+                        </span>
+                        <span>
+                            <i class="fas fa-calendar mr-1"></i>
+                            Created {{ folder.ctime | timestamp_to_date }}
+                        </span>
+                    </div>
+                    
+                    {% if folder.intro %}
+                    <p class="text-gray-600 text-sm line-clamp-2">
+                        {{ folder.intro }}
+                    </p>
+                    {% endif %}
+                    
+                    <div class="mt-4 flex items-center text-blue-600">
+                        <span class="text-sm font-medium">View Contents</span>
+                        <i class="fas fa-arrow-right ml-2"></i>
+                    </div>
+                </div>
+            </a>
+        </div>
+        {% endfor %}
+    </div>
+    
+    <!-- Statistics -->
+    <div class="mt-8 bg-white overflow-hidden shadow rounded-lg">
+        <div class="px-4 py-5 sm:p-6">
+            <h3 class="text-lg font-medium text-gray-900 mb-4">
+                <i class="fas fa-chart-bar text-green-500 mr-2"></i>
+                Statistics
+            </h3>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="text-center">
+                    <div class="text-2xl font-bold text-blue-600">{{ folders|length }}</div>
+                    <div class="text-sm text-gray-500">Total Folders</div>
+                </div>
+                <div class="text-center">
+                    <div class="text-2xl font-bold text-green-600">
+                        {{ folders|sum(attribute='media_count') }}
+                    </div>
+                    <div class="text-sm text-gray-500">Total Videos</div>
+                </div>
+                <div class="text-center">
+                    <div class="text-2xl font-bold text-purple-600">
+                        {{ (folders|selectattr('fav_state', 'equalto', 1)|list|length) }}
+                    </div>
+                    <div class="text-sm text-gray-500">Public Folders</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    {% else %}
+    <!-- Empty State -->
+    <div class="text-center py-12">
+        <div class="bg-white rounded-lg shadow-sm p-8">
+            <i class="fas fa-folder-open text-gray-400 text-6xl mb-4"></i>
+            <h3 class="text-xl font-semibold text-gray-900 mb-2">No Favorite Folders Found</h3>
+            <p class="text-gray-600 mb-4">
+                You don't have any favorite folders yet, or they are not accessible with your current configuration.
+            </p>
+            <div class="bg-blue-50 border border-blue-200 rounded-md p-4">
+                <div class="flex">
+                    <div class="flex-shrink-0">
+                        <i class="fas fa-info-circle text-blue-400"></i>
+                    </div>
+                    <div class="ml-3">
+                        <h3 class="text-sm font-medium text-blue-800">
+                            Troubleshooting Tips
+                        </h3>
+                        <div class="mt-2 text-sm text-blue-700">
+                            <ul class="list-disc pl-5 space-y-1">
+                                <li>Make sure your SESSDATA cookie is valid and not expired</li>
+                                <li>Verify that your UP_MID is correct</li>
+                                <li>Check if you have any favorite folders on Bilibili</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    // Add custom filter for timestamp to date conversion
+    function timestampToDate(timestamp) {
+        return new Date(timestamp * 1000).toLocaleDateString();
+    }
+    
+    // Add animation delays for cards
+    document.addEventListener('DOMContentLoaded', function() {
+        const cards = document.querySelectorAll('.fade-in');
+        cards.forEach((card, index) => {
+            card.style.animationDelay = `${index * 0.1}s`;
+        });
+    });
+</script>
+{% endblock %}

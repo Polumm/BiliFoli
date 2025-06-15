@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Login</title>
+    <meta charset="UTF-8" />
+</head>
+<body>
+    <h2>Login</h2>
+    {% if error %}
+        <p style="color: red;">{{ error }}</p>
+    {% endif %}
+    <form method="post">
+        <label for="key">Enter Secret Key:</label>
+        <input type="password" id="key" name="key" required>
+        <button type="submit">Login</button>
+    </form>
+</body>
+</html>
