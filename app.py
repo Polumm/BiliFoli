@@ -8,7 +8,7 @@ from pathlib import Path
 import os
 
 from proxy import http_proxy_router, ws_client, ws_backend
-from main import frontend_router
+from frontend_router import frontend_router
 from core.templates import setup_jinja_filters
 
 app = FastAPI(title="Unified Bili Viewer + Proxy")
