@@ -5,7 +5,8 @@ from datetime import datetime
 
 from fastapi import APIRouter, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-
+import math
+from typing import Optional
 from core.bilibili_api import BilibiliAPI
 from core.templates import templates
 
@@ -95,3 +96,59 @@ async def api_playurl(bvid: str):
     if not url:
         raise HTTPException(502, "No muxed MP4 stream found")
     return {"status": "success", "url": url}
+
+# ───────────────────────────── paginated folder API (for infinite scroll) ──
+@frontend_router.get("/api/folder/{media_id}")
+async def api_folder(
+    request: Request,
+    media_id: int,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=50),
+):
+    # Check authentication
+    if not _is_authed(request):
+        raise HTTPException(401, "Authentication required")
+    
+    # Check API configuration
+    cfg_err = bilibili_api.check_config()
+    if cfg_err:
+        raise HTTPException(500, f"Configuration error: {cfg_err}")
+    
+    try:
+        # Get actual data from bilibili API instead of mock data
+        res = await bilibili_api.get_folder_videos(media_id, page, page_size)
+        
+        if not res["success"]:
+            raise HTTPException(500, f"Bilibili API error: {res['error']}")
+        
+        data = res["data"]
+        
+        # Calculate total pages if media_count is available
+        total_pages: Optional[int] = None
+        if mc := data["info"].get("media_count"):
+            total_pages = math.ceil(mc / page_size)
+        elif data["has_more"]:
+            total_pages = page + 1
+        else:
+            total_pages = page
+
+        payload = {
+            "status": "success",
+            "data": {
+                "videos": data["videos"],
+                "current_page": page,
+                "page_size": page_size,
+                "has_more": data["has_more"],
+                **(
+                    {"total_pages": total_pages}
+                    if total_pages is not None
+                    else {}
+                ),
+            },
+        }
+        return payload
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Internal server error: {str(e)}")

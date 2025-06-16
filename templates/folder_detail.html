@@ -80,50 +80,92 @@
   /* external retry request (fired from mini_player.html) */
   document.addEventListener('video‑retry', e => playStream(e.detail, 1));
 
-  /* ——— infinite‑scroll (unchanged except stronger error checks) ——— */
+  /* ——— infinite‑scroll (FIXED) ——— */
   const sentinel   = document.getElementById('scrollSentinel');
   const spinner    = document.getElementById('spinner');
-  let   page       = {{ current_page }};
-  const totalPages = {{ total_pages }};
-  const pageSize   = {{ page_size }};
-  let   busy       = false;
+  
+  let page       = {{ current_page }};
+  let totalPages = {{ total_pages }};
+  const pageSize = {{ page_size }};
+  let hasMore    = {{ has_more|lower }};  // FIXED: Initialize hasMore properly
+  let busy       = false;
 
   const io = new IntersectionObserver(([entry]) => {
     if (entry.isIntersecting) loadMore();
   }, { rootMargin: '0px 0px 600px 0px' });
-  io.observe(sentinel);
+  
+  // Only start observing if there are more pages to load
+  if (hasMore) {
+    io.observe(sentinel);
+  }
 
   async function loadMore() {
-    if (busy || page >= totalPages) return;
+    if (busy || !hasMore) return;  // FIXED: Use hasMore instead of page >= totalPages
+    
     busy = true;
     spinner.classList.remove('hidden');
     io.unobserve(sentinel);
 
     try {
-      const r = await fetch(`/api/folder/{{ media_id }}?page=${page + 1}&page_size=${pageSize}`);
-      if (!r.ok) throw new Error(r.status);
+      const r = await fetch(`/api/folder/{{ media_id }}?page=${page + 1}&page_size=${pageSize}`, {
+        cache: 'no-store',
+        credentials: 'same-origin'  // FIXED: Added credentials
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      
       const j = await r.json();
-      const html = j.data.videos.map(v => `
-        <div class="bg-white rounded-lg shadow-sm overflow-hidden
-                    video-card cursor-pointer transition
-                    ring-offset-2 ring-offset-white hover:ring hover:ring-blue-300"
-             data-bvid="${v.bvid}">
-          <img src="${v.cover}" referrerpolicy="no-referrer"
-               class="w-full h-40 object-cover" alt="${v.title}">
-          <div class="p-3">
-            <h3 class="font-semibold text-gray-800 text-sm truncate mb-1" title="${v.title}">${v.title}</h3>
-            <p class="text-gray-500 text-xs">${window.format_duration(v.duration)} • ${window.timestamp_to_date(v.pubtime)}</p>
-          </div>
-        </div>`).join('');
-      grid.insertAdjacentHTML('beforeend', html);
-      page += 1;
+      
+      // FIXED: Check API response status
+      if (j.status !== 'success') {
+        throw new Error(j.error || 'API request failed');
+      }
+      
+      const data = j.data;
+      
+      // FIXED: Update pagination state from server response
+      page = data.current_page;
+      hasMore = data.has_more;
+      
+      // Update total pages if provided
+      if (data.total_pages) {
+        totalPages = data.total_pages;
+      }
+      
+      // FIXED: Check if videos exist before rendering
+      if (data.videos && data.videos.length > 0) {
+        const html = data.videos.map(v => `
+          <div class="bg-white rounded-lg shadow-sm overflow-hidden
+                      video-card cursor-pointer transition
+                      ring-offset-2 ring-offset-white hover:ring hover:ring-blue-300"
+               data-bvid="${v.bvid}">
+            <img src="${v.cover}" referrerpolicy="no-referrer"
+                 class="w-full h-40 object-cover" alt="${v.title}">
+            <div class="p-3">
+              <h3 class="font-semibold text-gray-800 text-sm truncate mb-1" title="${v.title}">${v.title}</h3>
+              <p class="text-gray-500 text-xs">
+                ${window.format_duration && v.duration ? window.format_duration(v.duration) : 'N/A'} • 
+                ${window.timestamp_to_date && v.pubtime ? window.timestamp_to_date(v.pubtime) : 'N/A'}
+              </p>
+            </div>
+          </div>`).join('');
+        grid.insertAdjacentHTML('beforeend', html);
+      }
+      
     } catch (e) {
       console.error('pagination failed:', e);
+      // FIXED: Optional user feedback for errors
+      // You could add a toast notification here if desired
+    } finally {
+      spinner.classList.add('hidden');
+      busy = false;
+      
+      // FIXED: Only resume observing if there are more pages
+      if (hasMore) {
+        io.observe(sentinel);
+      } else {
+        io.disconnect(); // Clean up observer when done
+      }
     }
-
-    spinner.classList.add('hidden');
-    busy = false;
-    io.observe(sentinel);
   }
 })();
 </script>
