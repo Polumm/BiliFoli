@@ -10,6 +10,7 @@ import os
 from proxy import http_proxy_router, ws_client, ws_backend
 from frontend_router import frontend_router
 from core.templates import setup_jinja_filters
+from core.auth_bilibili import router as bilibili_auth_router
 
 app = FastAPI(title="Unified Bili Viewer + Proxy")
 
@@ -23,6 +24,7 @@ app.add_middleware(
 app.include_router(http_proxy_router, prefix="/proxy")
 app.include_router(frontend_router)
 app.include_router(dropbox_router)
+app.include_router(bilibili_auth_router)
 
 # WebSocket routes
 app.add_api_websocket_route("/ws/backend", ws_backend)
