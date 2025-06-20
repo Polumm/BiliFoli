@@ -1,9 +1,10 @@
+<!-- templates/components/mini_player.html -->
 <div id="miniPlayerWrapper"
      class="sticky top-0 z-30 mb-8 hidden
             transition-all duration-300 ease-in-out
             bg-white/80 backdrop-blur pb-4">
 
-  <!-- video -->
+  <!-- video element -->
   <video id="miniPlayerVideo"
          preload="metadata" muted loop
          playsinline webkit-playsinline controls
@@ -23,15 +24,57 @@
           class="mt-2 px-4 py-1 bg-blue-600 text-white rounded">
     🎧 Play in background
   </button>
+
+  <!-- ⏰ sleep-timer controls -->
+  <div id="sleepTimerControls"
+       class="mt-3 flex items-center gap-2 text-sm">
+
+    <label for="sleepMinutes" class="text-gray-700 whitespace-nowrap flex items-center gap-1">
+      <span class="text-lg">⏰</span> Sleep in
+    </label>
+
+    <input id="sleepMinutes" type="number" min="1" max="180" step="1"
+           value="30"
+           class="w-16 border border-gray-300 rounded px-2 py-1
+                  focus:outline-none focus:ring-2 focus:ring-blue-500">
+
+    <span class="text-gray-600">min</span>
+
+    <button id="startSleepTimer"
+            class="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded">
+      Start
+    </button>
+
+    <span id="sleepTimerCountdown"
+          class="ml-2 text-gray-600 hidden"></span>
+
+    <button id="cancelSleepTimer"
+            class="px-3 py-1 bg-red-500 text-white rounded hidden">
+      Cancel
+    </button>
+  </div>
 </div>
 
 <script>
+/* -------------------------------------------------------------------------
+   Mini-player driver -- original logic + sleep-timer extension
+   --------------------------------------------------------------------- */
 (() => {
-  const video   = document.getElementById('miniPlayerVideo');
-  const pipBtn  = document.getElementById('pipBtn');
-  const unmute  = document.getElementById('unmuteOverlay');
+  /* ------------------------------------------------------------------ */
+  /* cached DOM refs                                                    */
+  /* ------------------------------------------------------------------ */
+  const video     = document.getElementById('miniPlayerVideo');
+  const pipBtn    = document.getElementById('pipBtn');
+  const unmute    = document.getElementById('unmuteOverlay');
 
-  /* PiP feature‑test */
+  const sleepIn   = document.getElementById('sleepMinutes');
+  const startBtn  = document.getElementById('startSleepTimer');
+  const cancelBtn = document.getElementById('cancelSleepTimer');
+  const label     = document.getElementById('sleepTimerCountdown');
+
+  /* ------------------------------------------------------------------ */
+  /* PiP helper                                                          */
+  /* ------------------------------------------------------------------ */
   const pipOK = ('requestPictureInPicture' in video) ||
                 (video.webkitSupportsPresentationMode &&
                  video.webkitSupportsPresentationMode('picture-in-picture'));
@@ -44,16 +87,18 @@
       } else {
         await video.webkitSetPresentationMode('picture-in-picture');
       }
-      if (video.muted) video.muted = false;
-    } catch {}
+      if (video.muted) video.muted = false;  // unmute when backgrounded
+    } catch { /* ignore */ }
   });
 
+  /* resume if tab becomes visible again */
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && !video.paused) {
       video.play().catch(() => {});
     }
   });
 
+  /* tap-to-unmute overlay */
   unmute.addEventListener('click', async () => {
     video.pause();
     video.muted = false;
@@ -61,11 +106,76 @@
     await video.play().catch(() => {});
   });
 
-  /* auto‑retry if the media pipeline throws */
+  /* auto-retry on pipeline errors */
   video.addEventListener('error', () => {
     if (video.dataset.bvid) {
-      document.dispatchEvent(new CustomEvent('video‑retry', { detail: video.dataset.bvid }));
+      document.dispatchEvent(
+        new CustomEvent('video-retry', { detail: video.dataset.bvid })
+      );
     }
+  });
+
+  /* ------------------------------------------------------------------ */
+  /* ⏰ S L E E P   T I M E R                                            */
+  /* ------------------------------------------------------------------ */
+  let sleepTimeoutId   = null;   // holds setTimeout reference
+  let countdownTicker  = null;   // holds setInterval reference
+  let targetTimestamp  = 0;      // when the timer should fire
+
+  /** Clear all timer resources and UI */
+  function clearSleepTimer() {
+    if (sleepTimeoutId)  { clearTimeout(sleepTimeoutId);  sleepTimeoutId  = null; }
+    if (countdownTicker) { clearInterval(countdownTicker); countdownTicker = null; }
+    label.classList.add('hidden');
+    label.textContent    = '';
+    cancelBtn.classList.add('hidden');
+    startBtn.disabled    = false;
+  }
+
+  /** Start a new sleep timer */
+  startBtn.addEventListener('click', () => {
+    const minutes = parseInt(sleepIn.value, 10);
+    if (isNaN(minutes) || minutes <= 0) {
+      alert('⏰ Please enter a valid number of minutes (1-180)'); return;
+    }
+
+    clearSleepTimer();                           // wipe previous timer
+    const ms = minutes * 60 * 1000;
+    targetTimestamp = Date.now() + ms;
+
+    /* live countdown label */
+    function tick() {
+      const diff = targetTimestamp - Date.now();
+      if (diff <= 0) {
+        /* timer finished */
+        clearSleepTimer();
+        video.pause();
+        if (document.pictureInPictureElement) {
+          document.exitPictureInPicture().catch(() => {});
+        }
+        return;
+      }
+      const mm = Math.floor(diff / 60000);
+      const ss = Math.floor((diff % 60000) / 1000);
+      label.textContent = `⏰ ${String(mm).padStart(2,'0')}:${String(ss).padStart(2,'0')}`;
+    }
+
+    tick();                              // initial paint
+    label.classList.remove('hidden');
+    cancelBtn.classList.remove('hidden');
+    startBtn.disabled = true;
+
+    countdownTicker = setInterval(tick, 1000);
+    sleepTimeoutId  = setTimeout(tick, ms + 1000);  // safety – fires final time
+  });
+
+  /** Cancel button */
+  cancelBtn.addEventListener('click', clearSleepTimer);
+
+  /* graciously dispose timer if the user switches videos */
+  video.addEventListener('play', () => {
+    /* keep running – users often want the timer to span multiple videos */
+    /* (remove the next line if you'd rather reset on every new play) */
   });
 })();
 </script>
