@@ -3,21 +3,15 @@
 
 ---
 
-<table>
-<tr><td>
-
 ### TL;DR
 
-| 🚀 | Browse & search all your **Bili favourite folders** in one place |
-| :tv: | Sticky **mini-player** with Picture-in-Picture & **sleep timer** |
-| 📥 | Built-in **Mini-Dropbox** for quick file drops |
-| 🛡️ | Local **HTTP & WebSocket proxy** (circumvents some region blocks) |
-| 🔒 | Simple password login + signed server-side sessions |
-| 📈 | Clean logging & configurable environment |
-| ⚡ | Powered by **FastAPI + HTMX/Tailwind** — hot-reload out of the box |
-
-</td></tr>
-</table>
+* **🚀 Browse & search all your Bili favourite folders in one place**
+* **:tv: Sticky mini-player with Picture-in-Picture & sleep timer**
+* **📥 Built-in Mini-Dropbox for quick file drops**
+* **🛡️ Local HTTP & WebSocket proxy (circumvents some region blocks)**
+* **🔒 Simple password login + signed server-side sessions**
+* **📈 Clean logging & configurable environment**
+* **⚡ Powered by FastAPI + HTMX/Tailwind — hot-reload out of the box**
 
 ---
 
