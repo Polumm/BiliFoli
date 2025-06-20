@@ -8,13 +8,13 @@
 
 ### TL;DR
 
-| :rocket: | Browse & search all your **Bili favourite folders** in one place |
-| :tv:     | Sticky **mini-player** with Picture-in-Picture & **sleep-timer** |
-| :inbox_tray: | Built-in **Mini-Dropbox** for quick file drops |
-| :shield: | Local **HTTP & WebSocket proxy** (circumvents some region blocks) |
-| :lock:   | Simple password login + signed server-side sessions            |
-| :chart_with_upwards_trend: | Clean logging & configurable environment |
-| :zap:    | Powered by **FastAPI + HTMX/Tailwind** — hot-reload out of the box |
+| 🚀 | Browse & search all your **Bili favourite folders** in one place |
+| :tv: | Sticky **mini-player** with Picture-in-Picture & **sleep timer** |
+| 📥 | Built-in **Mini-Dropbox** for quick file drops |
+| 🛡️ | Local **HTTP & WebSocket proxy** (circumvents some region blocks) |
+| 🔒 | Simple password login + signed server-side sessions |
+| 📈 | Clean logging & configurable environment |
+| ⚡ | Powered by **FastAPI + HTMX/Tailwind** — hot-reload out of the box |
 
 </td></tr>
 </table>
@@ -28,7 +28,7 @@
 | **Folder explorer** | Infinite scroll, stats widgets, smart retries on API errors |
 | **Video playback**  | HLS/MP4 direct-stream, PiP button, *⏰ Sleep timer* that pauses the player (and exits PiP) after N minutes |
 | **Mini-Dropbox**    | Upload / download / delete files inside `./dropbox` with drag-&-drop UX |
-| **Proxy layer**     | `/proxy/**` catch-all route fan-outs requests to any connected *proxy-client* via WebSocket and streams the first reply (not used for bilibili) |
+| **Proxy layer**     | `/proxy/**` catch-all route fans out requests to any connected *proxy-client* via WebSocket and streams the first reply (not used for Bilibili) |
 | **Security**        | Secrets stored via env-vars, `SessionMiddleware` cookies, optional HTTPS proxy front-end |
 | **Dev ergonomics**  | Structured logging (`logging_config.py`), hot-reload (`uvicorn --reload`), typed core helpers |
 
@@ -41,20 +41,20 @@
 | Requirement | Tested on |
 |-------------|-----------|
 | **Python**  | 3.10 – 3.12 |
-| **pip / venv** | any recent version |
+| **pip / venv** | Any recent version |
 | **Browser** | Chrome > 93, Edge > 93, Safari 16, Firefox 117 |
 
-### 2.2 Clone & install
+### 2.2 Clone & Install
 
 ```bash
 git clone https://github.com/your-org/bilifoli.git
 cd bilifoli
 python -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
+source .venv/bin/activate          # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ````
 
-### 2.3 Environment variables
+### 2.3 Environment Variables
 
 | Variable         | Required? | Description                                                         |
 | ---------------- | --------- | ------------------------------------------------------------------- |
@@ -62,9 +62,9 @@ pip install -r requirements.txt
 | `UP_MID`         | ✅         | UID of the Bilibili account that owns the favourite folders         |
 | `BILI_JCT`       | ⏲️        | CSRF token — only needed for certain write calls                    |
 | `LOGIN_SECRET`   | ✅         | Password for the `/login` page                                      |
-| `SESSION_SECRET` | 🔒        | Server-side session signing key (defaults to “change-this-in-prod”) |
+| `SESSION_SECRET` | 🔒        | Server-side session signing key (defaults to `change-this-in-prod`) |
 
-You can place them in a `.env` file or export them in your shell before launch.
+You can place these in a `.env` file or export them in your shell before launch.
 
 ### 2.4 Run
 
@@ -92,8 +92,8 @@ docker run -p 8000:8000 \
 
 ```
 .
-├── app.py                # FastAPI application entry-point
-├── proxy.py              # HTTP/WS proxy fan-out logic (not used for bilibili)
+├── app.py                # FastAPI application entry point
+├── proxy.py              # HTTP/WS proxy fan-out logic (not used for Bilibili)
 ├── frontend_router.py    # UI routes & API endpoints
 ├── dropbox.py            # Mini Dropbox service
 ├── core/
@@ -104,20 +104,19 @@ docker run -p 8000:8000 \
 │   └── components/       # Mini-player, cards, …
 ├── static/               # JS/CSS assets (auto-created)
 ├── requirements.txt
-└── README.md             # ← you are here
+└── README.md             # ← You are here
 ```
 
 ---
 
-## 4. Sleep-Timer ⏰
+## 4. Sleep Timer ⏰
 
-* Click **Start** under the mini-player, choose minutes (1-180).
-* A live `mm:ss` countdown appears.
-* When it hits 00:00 the video pauses, PiP exits, and the timer clears.
-* **Cancel** anytime to keep watching.
+* Click **Start** under the mini-player, choose minutes (1–180)
+* A live `mm:ss` countdown appears
+* When it hits 00:00, the video pauses, PiP exits, and the timer clears
+* Click **Cancel** anytime to keep watching
 
-No cookies, no storage — pure in-memory JavaScript (see
-`templates/components/mini_player.html`).
+No cookies, no storage — pure in-memory JavaScript (see `templates/components/mini_player.html`).
 
 ---
 
@@ -126,11 +125,11 @@ No cookies, no storage — pure in-memory JavaScript (see
 | Idea                   | Where to start                                                       |
 | ---------------------- | -------------------------------------------------------------------- |
 | 🎨 Add dark mode       | `templates/base.html` and Tailwind `@media (prefers-color-scheme)`   |
-| 📱 PWA / mobile icon   | `static/manifest.json` + service-worker                              |
+| 📱 PWA / mobile icon   | `static/manifest.json` + service worker                              |
 | 📊 Extra stats         | `frontend_router.index` → add new widgets                            |
 | 🧩 Custom proxy client | Implement a WebSocket that listens to `/ws/backend` and answers JSON |
 
-Pull requests & discussions welcome! Please open an issue first for major changes.
+Pull requests and discussions welcome! Please open an issue first for major changes.
 
 ---
 
@@ -139,9 +138,9 @@ Pull requests & discussions welcome! Please open an issue first for major change
 | Symptom                              | Checklist                                                        |
 | ------------------------------------ | ---------------------------------------------------------------- |
 | **Empty folder list**                | Is `SESSDATA` still valid? Region-locked?                        |
-| **HTTP 504 on `/proxy/*`**           | No proxy-clients connected; check browser console                |
+| **HTTP 504 on `/proxy/*`**           | No proxy-clients connected; check the browser console            |
 | **“Failed to start video” alert**    | Bilibili blocked the quality level; try again (auto-retry ×2)    |
-| **Sleep-timer didn’t stop playback** | Some browsers throttle `setTimeout` in background tabs → use PiP |
+| **Sleep timer didn’t stop playback** | Some browsers throttle `setTimeout` in background tabs → use PiP |
 
 ---
 
@@ -152,5 +151,3 @@ Pull requests & discussions welcome! Please open an issue first for major change
 * Icons from [Font Awesome 6](https://fontawesome.com/)
 
 > *Made with ☕ and a healthy dose of Focus.*
-
-```
