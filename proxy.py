@@ -1,15 +1,17 @@
 import json
 import uuid
 import asyncio
-from typing import Dict, Set, List, Tuple
+from typing import Dict, Set, List
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Request
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Request, FastAPI
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from logging_config import setup_logging
 
 logger = setup_logging("proxy-service")
-
+http_proxy_router = APIRouter()
+app = FastAPI()
+app.include_router(http_proxy_router, prefix="/proxy")
 # ---------------------------------------------------------------------------
 # Globals & configuration
 # ---------------------------------------------------------------------------
@@ -22,8 +24,8 @@ client_sockets: Set[WebSocket] = set()
 pending_responses: Dict[str, List[asyncio.Future]] = {}
 """Maps *message_id* → list of futures awaiting that response."""
 
-pending_streams: Dict[str, Tuple[asyncio.Queue, List[asyncio.Future]]] = {}
-"""Maps *stream_id* → queue of SSE chunks and waiters."""
+pending_streams: Dict[str, asyncio.Queue] = {}
+"""Queues for streaming SSE responses."""
 
 RESPONSE_TIMEOUT = 10  # seconds
 
@@ -47,19 +49,17 @@ async def _register_client(ws: WebSocket) -> None:
         while True:
             data = await ws.receive_text()
             msg = json.loads(data)
-
-            # --- SSE streaming path ------------------------------------
+            # SSE-streaming frames
             if msg.get("mode") == "stream":
                 stream_id = msg["id"]
-                queue, _ = pending_streams.get(stream_id, (None, None))
-                if queue:
+                q = pending_streams.get(stream_id)
+                if q:
                     if msg.get("final"):
-                        await queue.put(None)
+                        await q.put(None)          # end-of-stream sentinel
                     else:
-                        await queue.put(msg["event"])
+                        await q.put(msg["event"])  # one "data:" chunk
                 continue
 
-            # --- Regular response path ---------------------------------
             response_id = msg.get("id")
             if response_id and response_id in pending_responses:
                 futures = pending_responses.pop(response_id, [])
@@ -74,12 +74,12 @@ async def _register_client(ws: WebSocket) -> None:
         client_sockets.discard(ws)
         logger.info("ℹ️ removed client | remaining=%d", len(client_sockets))
 
-
+@http_proxy_router.websocket("/ws/client")
 async def ws_client(ws: WebSocket):  # exported
     """WebSocket entry‑point for proxy‑clients."""
     await _register_client(ws)
 
-
+@http_proxy_router.websocket("/ws/backend")
 async def ws_backend(ws: WebSocket):  # exported
     """Optional backend socket (placeholder) – keeps feature‑parity with the
     historical interface so existing *main.py* integrations keep working even
@@ -121,11 +121,13 @@ async def proxy_http(full_path: str, request: Request):
 
     headers = {k: v for k, v in request.headers.items() if k.lower() in {"authorization", "content-type"}}
 
+    # detect an SSE client and switch into streaming mode
     is_sse = request.headers.get("accept", "").lower().startswith("text/event-stream")
-    mode = "stream" if is_sse else "single"
+    mode   = "stream" if is_sse else "single"
 
     payload = {
         "id": message_id,
+        "mode":    mode,
         "endpoint": endpoint,
         "method": method,
         "message": body,
@@ -134,39 +136,39 @@ async def proxy_http(full_path: str, request: Request):
 
     logger.info("📨 %s %s | headers=%s", method, endpoint, headers)
 
+    # ---------------- Fan‑out -----------------
     if mode == "stream":
-        stream_queue: asyncio.Queue[str] = asyncio.Queue()
-        chunk_waiters: List[asyncio.Future] = []
-        pending_streams[message_id] = (stream_queue, chunk_waiters)
+        # single‐client "start streaming" shot
+        try:
+            client = next(iter(client_sockets))
+        except StopIteration:
+            return JSONResponse(status_code=503, content={"error": "No proxy-clients"})
 
-        # find first alive client
-        first_client: WebSocket | None = None
-        for client in list(client_sockets):
-            try:
-                await client.send_text(json.dumps(payload | {"mode": "stream"}))
-                first_client = client
-                break
-            except Exception as e:
-                logger.warning("⛔ failed to send to client: %s", e)
-                client_sockets.discard(client)
+        q = asyncio.Queue()
+        pending_streams[message_id] = q
 
-        if not first_client:
+        try:
+            await client.send_text(json.dumps(payload))
+        except Exception:
+            client_sockets.discard(client)
             pending_streams.pop(message_id, None)
-            return JSONResponse(status_code=503, content={"error": "No alive proxy‑clients"})
+            return JSONResponse(status_code=503, content={"error": "No proxy-clients"})
 
-        async def event_generator():
+        async def event_gen():
             try:
                 while True:
-                    line = await stream_queue.get()
-                    if line is None:
+                    chunk = await q.get()
+                    if chunk is None:
                         break
-                    yield line
+                    yield chunk   # already ends with "\n\n"
             finally:
                 pending_streams.pop(message_id, None)
 
-        return StreamingResponse(event_generator(), media_type="text/event-stream")
+        return StreamingResponse(
+            event_gen(),
+            media_type="text/event-stream",
+        )
 
-    # ---------------- Fan‑out -----------------
     futures: List[asyncio.Future] = []
     dead_clients: Set[WebSocket] = set()
 
@@ -185,7 +187,7 @@ async def proxy_http(full_path: str, request: Request):
         client_sockets.discard(dc)
 
     if not futures:
-        return JSONResponse(status_code=503, content={"error": "No alive proxy‑clients"})
+        return JSONResponse(status_code=503, content={"error": "No alive proxy-clients"})
 
     # ---------------- Wait for first response -----------------
     try:
@@ -207,8 +209,4 @@ async def proxy_http(full_path: str, request: Request):
 
 @http_proxy_router.get("/health")
 async def health():
-    return {
-        "status": "proxy healthy",
-        "connected_clients": len(client_sockets),
-        "active_streams": len(pending_streams),
-    }
+    return {"status": "proxy healthy", "connected_clients": len(client_sockets)}
