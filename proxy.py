@@ -105,33 +105,67 @@ async def proxy_http(full_path: str, request: Request):
     if not clients:
         return JSONResponse(status_code=503, content={"error": f"No {mode} clients connected"})
 
+    # ── Streaming (SSE) request ──────────────────────────────────────
     if mode == "stream":
-        client = next(iter(clients))  # send to the first available streaming client
-        q = asyncio.Queue()
+        client = next(iter(stream_clients))          # first available
+        q: asyncio.Queue[str | None] = asyncio.Queue()
         pending_streams[message_id] = q
 
         try:
             await client.send_text(json.dumps(payload))
-        except Exception as e:
-            logger.warning(f"❌ Failed to send stream request: {e}")
+        except Exception as exc:
+            logger.warning("❌ Failed to send stream request: %s", exc)
             pending_streams.pop(message_id, None)
-            return JSONResponse(status_code=503, content={"error": "Stream client send failed"})
+            return JSONResponse(
+                status_code=503,
+                content={"error": "Stream client send failed"},
+            )
 
         async def event_gen():
+            """
+            Turn the async queue that the WebSocket fills into an SSE stream.
+
+            • send a one-off “probe” so browsers mark EventSource as OPEN
+            • heartbeat every HEARTBEAT seconds while idle
+            • break when a `None` sentinel arrives
+            """
+            HEARTBEAT = 15 # settings.sse_heartbeat_seconds
+            yield ": probe\n\n"                      # immediately OPEN
+            last = asyncio.get_event_loop().time()
+
             try:
                 while True:
+                    timeout = HEARTBEAT - (
+                        asyncio.get_event_loop().time() - last
+                    )
+                    timeout = max(0, timeout)
+
                     try:
-                        chunk = await asyncio.wait_for(q.get(), timeout=15)
+                        chunk = await asyncio.wait_for(q.get(), timeout=timeout)
                     except asyncio.TimeoutError:
                         yield ": keep-alive\n\n"
+                        last = asyncio.get_event_loop().time()
                         continue
-                    if chunk is None:
+
+                    if chunk is None:                # sentinel → done
                         break
+
                     yield chunk
+                    last = asyncio.get_event_loop().time()
+
             finally:
                 pending_streams.pop(message_id, None)
 
-        return StreamingResponse(event_gen(), media_type="text/event-stream")
+        return StreamingResponse(
+            event_gen(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
 
     # Regular HTTP (non-stream) case
     futures: List[asyncio.Future] = []
