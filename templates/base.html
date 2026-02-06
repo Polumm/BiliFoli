@@ -110,18 +110,26 @@
             document.getElementById('loading-overlay').classList.add('hidden');
         }
 
-        // Add loading to all navigation links
+        // Fix iOS swipe-back / bfcache restore (DOMContentLoaded won't re-run)
+        window.addEventListener('pageshow', function () {
+            hideLoading();
+        });
+
+        // Optional fallback for some browsers/history cases
+        window.addEventListener('popstate', function () {
+            hideLoading();
+        });
+
         document.addEventListener('DOMContentLoaded', function() {
             const links = document.querySelectorAll('a[href^="/"]');
             links.forEach(link => {
-                link.addEventListener('click', function(e) {
-                    if (!this.hasAttribute('target')) {
-                        showLoading();
-                    }
-                });
+            link.addEventListener('click', function() {
+                if (!this.hasAttribute('target')) {
+                showLoading();
+                }
+            });
             });
 
-            // Hide loading when page loads
             hideLoading();
         });
 
