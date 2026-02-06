@@ -7,7 +7,6 @@ from core.templates import setup_jinja_filters
 from pathlib import Path
 import os
 
-from proxy import http_proxy_router, ws_client, ws_backend
 from frontend_router import frontend_router
 from core.templates import setup_jinja_filters
 
@@ -20,13 +19,8 @@ app.add_middleware(
 )
 
 # Routers
-app.include_router(http_proxy_router, prefix="/proxy")
 app.include_router(frontend_router)
 app.include_router(dropbox_router)
-
-# WebSocket routes
-app.add_api_websocket_route("/ws/backend", ws_backend)
-app.add_api_websocket_route("/ws/client", ws_client)
 
 # Setup templates and filters
 setup_jinja_filters() 
