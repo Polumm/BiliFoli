@@ -91,11 +91,73 @@ async def folder_detail(request: Request, media_id: int, page: int = Query(1, ge
 # ─────────────────────────────────────────────────────────────── API layer ────
 
 @frontend_router.get("/api/video/{bvid}/playurl")
-async def api_playurl(bvid: str):
-    url = await bilibili_api.get_muxed_mp4(bvid)
+async def api_playurl(
+    request: Request,
+    bvid: str,
+    cid: Optional[int] = Query(None, ge=1),
+):
+    if not _is_authed(request):
+        raise HTTPException(401, "Authentication required")
+
+    cfg_err = bilibili_api.check_config()
+    if cfg_err:
+        raise HTTPException(500, f"Configuration error: {cfg_err}")
+
+    url: Optional[str] = None
+
+    # Preferred: core.bilibili_api.get_muxed_mp4 supports cid
+    try:
+        url = await bilibili_api.get_muxed_mp4(bvid, cid=cid)  # type: ignore[arg-type]
+    except TypeError:
+        # Backward compatible with older signature get_muxed_mp4(bvid)
+        if cid is None:
+            url = await bilibili_api.get_muxed_mp4(bvid)
+        else:
+            # Fallback: derive mp4 URL from playinfo for the given cid
+            for q in (16, 32, 48):
+                res = await bilibili_api.get_playinfo(bvid, cid, qn=q)
+                if not res.get("success"):
+                    continue
+                data = res.get("data") or {}
+                durl = data.get("durl") or []
+                if not durl:
+                    continue
+
+                mp4s = [
+                    seg.get("url")
+                    for seg in durl
+                    if isinstance(seg, dict) and ".mp4" in str(seg.get("url", "")).lower()
+                ]
+                url = mp4s[0] if mp4s and mp4s[0] else (durl[0].get("url") if isinstance(durl[0], dict) else None)
+                if url:
+                    break
+
     if not url:
         raise HTTPException(502, "No muxed MP4 stream found")
+
     return {"status": "success", "url": url}
+
+
+@frontend_router.get("/api/video/{bvid}/playlist")
+async def api_playlist(request: Request, bvid: str):
+    if not _is_authed(request):
+        raise HTTPException(401, "Authentication required")
+
+    cfg_err = bilibili_api.check_config()
+    if cfg_err:
+        raise HTTPException(500, f"Configuration error: {cfg_err}")
+
+    if not hasattr(bilibili_api, "get_playlist"):
+        raise HTTPException(
+            501,
+            "Playlist API not available. Update core/bilibili_api.py to add get_playlist().",
+        )
+
+    res = await bilibili_api.get_playlist(bvid)  # type: ignore[attr-defined]
+    if not res.get("success"):
+        raise HTTPException(502, res.get("error") or "Failed to fetch playlist")
+
+    return {"status": "success", "data": res.get("data")}
 
 # ───────────────────────────── paginated folder API (for infinite scroll) ──
 @frontend_router.get("/api/folder/{media_id}")

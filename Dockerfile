@@ -3,12 +3,14 @@ FROM python:3.11-slim
 
 # Set the working directory inside the container
 WORKDIR /app
-COPY templates/ templates/
+
 # Copy the requirements.txt file and install dependencies first.
 # This leverages Docker's layer caching: if requirements.txt doesn't change,
 # this step won't re-run, speeding up builds.
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt ./
+# BuildKit pip cache (fast rebuilds even when deps do change)
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -r requirements.txt
 
 # Copy the entire application directory into the container.
 # The '.' means copy everything from the current build context (your project root)

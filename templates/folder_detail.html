@@ -36,135 +36,322 @@
 {% endblock %}
 
 {% block extra_scripts %}
+
+<script id="folderPageData" type="application/json">
+  {{ {
+    "current_page": current_page,
+    "total_pages": total_pages,
+    "page_size": page_size,
+    "has_more": has_more,
+    "media_id": media_id
+  } | tojson }}
+</script>
+
 <script>
 (() => {
   const grid      = document.getElementById('videoGrid');
   const wrapper   = document.getElementById('miniPlayerWrapper');
   const video     = document.getElementById('miniPlayerVideo');
   const unmuteBtn = document.getElementById('unmuteOverlay');
+  const closeBtn  = document.getElementById('closeMiniPlayer');
 
-  /* Helper: try up to 3 times, falling back to lower qualities the server picks */
-  async function playStream(bvid, attempt = 0) {
+  let playlistMeta  = null;
+  let playlistItems = [];
+  let playlistIndex = 0;
+
+  function safeText(s) {
+    return (s == null) ? '' : String(s);
+  }
+
+  function escHtml(s) {
+    return safeText(s)
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
+  }
+
+  function ensurePlaylistUI() {
+    if (!wrapper) return null;
+
+    let bar = document.getElementById('playlistBar');
+    let titleEl = document.getElementById('playlistTitle');
+    let itemsEl = document.getElementById('playlistItems');
+
+    if (bar && titleEl && itemsEl) return { bar, titleEl, itemsEl };
+
+    const pipBtn = document.getElementById('pipBtn');
+    const html = `
+      <div id="playlistBar" class="mt-3 hidden">
+        <div id="playlistTitle" class="text-sm text-gray-700 mb-2 truncate"></div>
+        <div id="playlistItems" class="flex gap-2 overflow-x-auto pb-2"></div>
+      </div>
+    `;
+
+    if (pipBtn) pipBtn.insertAdjacentHTML('afterend', html);
+    else wrapper.insertAdjacentHTML('beforeend', html);
+
+    bar = document.getElementById('playlistBar');
+    titleEl = document.getElementById('playlistTitle');
+    itemsEl = document.getElementById('playlistItems');
+
+    if (!bar || !titleEl || !itemsEl) return null;
+    return { bar, titleEl, itemsEl };
+  }
+
+  function hidePlaylistUI() {
+    playlistMeta = null;
+    playlistItems = [];
+    playlistIndex = 0;
+
+    const ui = ensurePlaylistUI();
+    if (!ui) return;
+
+    ui.bar.classList.add('hidden');
+    ui.titleEl.textContent = '';
+    ui.itemsEl.innerHTML = '';
+  }
+
+  function updatePlaylistHighlight() {
+    const ui = ensurePlaylistUI();
+    if (!ui) return;
+
+    Array.from(ui.itemsEl.children).forEach((el, idx) => {
+      if (!(el instanceof HTMLElement)) return;
+
+      const active = idx === playlistIndex;
+
+      el.classList.toggle('bg-blue-600', active);
+      el.classList.toggle('text-white', active);
+      el.classList.toggle('border-blue-600', active);
+
+      el.classList.toggle('bg-white', !active);
+      el.classList.toggle('text-gray-800', !active);
+      el.classList.toggle('border-gray-300', !active);
+    });
+  }
+
+  async function playStream(bvid, cid = null, attempt = 0) {
+    if (!video || !bvid) return;
+
     try {
-      const r = await fetch(`/api/video/${bvid}/playurl`, { cache: 'no-store' });
+      const url = cid
+        ? `/api/video/${bvid}/playurl?cid=${encodeURIComponent(cid)}`
+        : `/api/video/${bvid}/playurl`;
+
+      const r = await fetch(url, { cache: 'no-store', credentials: 'same-origin' });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
+
       const j = await r.json();
       if (!j.url) throw new Error('empty URL');
 
       video.src = j.url;
-      video.dataset.bvid = bvid;   // allow the mini‑player to retry itself
+      video.dataset.bvid = bvid;
+      video.dataset.cid = cid ? String(cid) : '';
       video.load();
+
       await video.play();
-      unmuteBtn.classList.remove('hidden');
+      if (unmuteBtn) unmuteBtn.classList.remove('hidden');
     } catch (e) {
-      if (attempt < 2) return playStream(bvid, attempt + 1); // auto‑retry ×2
+      if (attempt < 2) return playStream(bvid, cid, attempt + 1);
       console.warn('playback failed:', e);
-      alert('⚠️ Unable to start this video. Try another one?');
+      alert('Unable to start this video. Try another one.');
     }
   }
 
-  /* click on a card → start playback */
-  grid.addEventListener('click', ev => {
+  async function fetchPlaylist(bvid) {
+    const r = await fetch(`/api/video/${bvid}/playlist`, { cache: 'no-store', credentials: 'same-origin' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const j = await r.json();
+    if (j.status !== 'success') throw new Error(j.error || 'playlist failed');
+    return j.data; // { type, title, items[] }
+  }
+
+  async function selectPlaylistIndex(idx) {
+    if (!playlistItems[idx]) return;
+    playlistIndex = idx;
+    updatePlaylistHighlight();
+    const item = playlistItems[idx];
+    await playStream(item.bvid, item.cid);
+  }
+
+  function renderPlaylist(meta, startIndex) {
+    const ui = ensurePlaylistUI();
+
+    playlistMeta = meta || null;
+    playlistItems = (meta && Array.isArray(meta.items)) ? meta.items : [];
+    playlistIndex = Math.max(0, Math.min(startIndex || 0, Math.max(0, playlistItems.length - 1)));
+
+    if (!ui) return;
+
+    if (playlistItems.length <= 1) {
+      hidePlaylistUI();
+      return;
+    }
+
+    ui.titleEl.textContent = meta.title || '';
+    ui.itemsEl.innerHTML = '';
+
+    playlistItems.forEach((item, idx) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'px-3 py-1 rounded border border-gray-300 bg-white text-gray-800 text-sm whitespace-nowrap flex-shrink-0 hover:bg-gray-50';
+      btn.textContent = (meta.type === 'pages' && item.page) ? `P${item.page}` : `${idx + 1}`;
+      btn.title = item.title || '';
+      btn.addEventListener('click', () => selectPlaylistIndex(idx));
+      ui.itemsEl.appendChild(btn);
+    });
+
+    ui.bar.classList.remove('hidden');
+    updatePlaylistHighlight();
+  }
+
+  grid.addEventListener('click', async (ev) => {
     const card = ev.target.closest('[data-bvid]');
-    if (!card) return;
+    if (!card || !card.dataset.bvid) return;
 
     document.querySelectorAll('.video-card')
-            .forEach(el => el.classList.remove('ring', 'ring-blue-400'));
+      .forEach(el => el.classList.remove('ring', 'ring-blue-400'));
     card.classList.add('ring', 'ring-blue-400');
 
-    playStream(card.dataset.bvid);
-    wrapper.classList.remove('hidden');
-    if (window.innerWidth < 768) wrapper.scrollIntoView({ behavior: 'smooth' });
+    const clickedBvid = card.dataset.bvid;
+
+    if (wrapper) wrapper.classList.remove('hidden');
+    if (wrapper && window.innerWidth < 768) wrapper.scrollIntoView({ behavior: 'smooth' });
+
+    try {
+      const meta = await fetchPlaylist(clickedBvid);
+      const items = Array.isArray(meta.items) ? meta.items : [];
+
+      let startIndex = 0;
+      const found = items.findIndex(it => it && it.bvid === clickedBvid);
+      if (found >= 0) startIndex = found;
+
+      renderPlaylist(meta, startIndex);
+
+      if (items[startIndex]) {
+        await playStream(items[startIndex].bvid, items[startIndex].cid);
+      } else {
+        hidePlaylistUI();
+        await playStream(clickedBvid, null);
+      }
+    } catch (e) {
+      console.warn('playlist load failed:', e);
+      hidePlaylistUI();
+      await playStream(clickedBvid, null);
+    }
   });
 
-  /* external retry request (fired from mini_player.html) */
-  document.addEventListener('video‑retry', e => playStream(e.detail, 1));
+  function handleRetryEvent(e) {
+    let bvid = video ? (video.dataset.bvid || '') : '';
+    let cid = (video && video.dataset.cid) ? parseInt(video.dataset.cid, 10) : null;
+    if (cid != null && Number.isNaN(cid)) cid = null;
 
-  /* ——— infinite‑scroll (FIXED) ——— */
+    const d = e && e.detail;
+    if (typeof d === 'string') {
+      bvid = d || bvid;
+    } else if (d && typeof d === 'object') {
+      if (typeof d.bvid === 'string') bvid = d.bvid || bvid;
+      if (typeof d.cid === 'number') cid = d.cid;
+      if (typeof d.cid === 'string' && d.cid) {
+        const n = parseInt(d.cid, 10);
+        if (!Number.isNaN(n)) cid = n;
+      }
+    }
+
+    if (bvid) playStream(bvid, cid, 1);
+  }
+
+  document.addEventListener('video-retry', handleRetryEvent);
+  document.addEventListener('video-retry', handleRetryEvent);
+
+  if (closeBtn) closeBtn.addEventListener('click', hidePlaylistUI);
+
   const sentinel   = document.getElementById('scrollSentinel');
   const spinner    = document.getElementById('spinner');
-  
-  let page       = {{ current_page }};
-  let totalPages = {{ total_pages }};
-  const pageSize = {{ page_size }};
-  let hasMore    = {{ has_more|lower }};  // FIXED: Initialize hasMore properly
-  let busy       = false;
+
+  const pageDataEl = document.getElementById('folderPageData');
+  const pageData = pageDataEl ? JSON.parse(pageDataEl.textContent || '{}') : {};
+
+  let page       = Number(pageData.current_page || 1);
+  let totalPages = Number(pageData.total_pages || 1);
+  const pageSize = Number(pageData.page_size || 20);
+  let hasMore    = Boolean(pageData.has_more);
+  const mediaId  = pageData.media_id;
+
+  let busy = false;
 
   const io = new IntersectionObserver(([entry]) => {
     if (entry.isIntersecting) loadMore();
   }, { rootMargin: '0px 0px 600px 0px' });
-  
-  // Only start observing if there are more pages to load
-  if (hasMore) {
-    io.observe(sentinel);
-  }
+
+  if (hasMore) io.observe(sentinel);
 
   async function loadMore() {
-    if (busy || !hasMore) return;  // FIXED: Use hasMore instead of page >= totalPages
-    
+    if (busy || !hasMore) return;
+
     busy = true;
     spinner.classList.remove('hidden');
     io.unobserve(sentinel);
 
     try {
-      const r = await fetch(`/api/folder/{{ media_id }}?page=${page + 1}&page_size=${pageSize}`, {
+      const r = await fetch(`/api/folder/${encodeURIComponent(mediaId)}?page=${page + 1}&page_size=${pageSize}`, {
         cache: 'no-store',
-        credentials: 'same-origin'  // FIXED: Added credentials
+        credentials: 'same-origin'
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      
+
       const j = await r.json();
-      
-      // FIXED: Check API response status
-      if (j.status !== 'success') {
-        throw new Error(j.error || 'API request failed');
-      }
-      
-      const data = j.data;
-      
-      // FIXED: Update pagination state from server response
+      if (j.status !== 'success') throw new Error(j.error || 'API request failed');
+
+      const data = j.data || {};
+
       page = data.current_page;
-      hasMore = data.has_more;
-      
-      // Update total pages if provided
-      if (data.total_pages) {
-        totalPages = data.total_pages;
-      }
-      
-      // FIXED: Check if videos exist before rendering
-      if (data.videos && data.videos.length > 0) {
-        const html = data.videos.map(v => `
-          <div class="bg-white rounded-lg shadow-sm overflow-hidden
-                      video-card cursor-pointer transition
-                      ring-offset-2 ring-offset-white hover:ring hover:ring-blue-300"
-               data-bvid="${v.bvid}">
-            <img src="${v.cover}" referrerpolicy="no-referrer"
-                 class="w-full h-40 object-cover" alt="${v.title}">
-            <div class="p-3">
-              <h3 class="font-semibold text-gray-800 text-sm truncate mb-1" title="${v.title}">${v.title}</h3>
-              <p class="text-gray-500 text-xs">
-                ${window.format_duration && v.duration ? window.format_duration(v.duration) : 'N/A'} • 
-                ${window.timestamp_to_date && v.pubtime ? window.timestamp_to_date(v.pubtime) : 'N/A'}
-              </p>
-            </div>
-          </div>`).join('');
+      hasMore = !!data.has_more;
+
+      if (data.total_pages) totalPages = data.total_pages;
+
+      if (Array.isArray(data.videos) && data.videos.length > 0) {
+        const html = data.videos.map(v => {
+          const title = escHtml(v.title);
+          const cover = escHtml(v.cover);
+          const bvid  = escHtml(v.bvid);
+
+          const durText = (typeof formatDuration === 'function')
+            ? formatDuration(v.duration)
+            : 'N/A';
+
+          const dateText = (typeof formatDate === 'function')
+            ? formatDate(v.pubtime)
+            : 'N/A';
+
+          return `
+            <div class="bg-white rounded-lg shadow-sm overflow-hidden
+                        video-card cursor-pointer transition
+                        ring-offset-2 ring-offset-white hover:ring hover:ring-blue-300"
+                 data-bvid="${bvid}">
+              <img src="${cover}" referrerpolicy="no-referrer"
+                   class="w-full h-40 object-cover" alt="${title}">
+              <div class="p-3">
+                <h3 class="font-semibold text-gray-800 text-sm truncate mb-1" title="${title}">${title}</h3>
+                <p class="text-gray-500 text-xs">
+                  ${durText} • ${dateText}
+                </p>
+              </div>
+            </div>`;
+        }).join('');
+
         grid.insertAdjacentHTML('beforeend', html);
       }
-      
     } catch (e) {
       console.error('pagination failed:', e);
-      // FIXED: Optional user feedback for errors
-      // You could add a toast notification here if desired
     } finally {
       spinner.classList.add('hidden');
       busy = false;
-      
-      // FIXED: Only resume observing if there are more pages
-      if (hasMore) {
-        io.observe(sentinel);
-      } else {
-        io.disconnect(); // Clean up observer when done
-      }
+
+      if (hasMore) io.observe(sentinel);
+      else io.disconnect();
     }
   }
 })();
