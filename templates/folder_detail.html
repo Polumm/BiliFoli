@@ -132,31 +132,105 @@
     });
   }
 
-  async function playStream(bvid, cid = null, attempt = 0) {
-    if (!video || !bvid) return;
+let activePlaySessionId = 0;
+let runningSessionId = 0;
+let alertedSessionId = 0;
 
-    try {
-      const url = cid
-        ? `/api/video/${bvid}/playurl?cid=${encodeURIComponent(cid)}`
-        : `/api/video/${bvid}/playurl`;
+function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
+}
 
-      const r = await fetch(url, { cache: 'no-store', credentials: 'same-origin' });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+async function fetchPlayUrl(bvid, cid, signal) {
+  const url = cid
+    ? `/api/video/${bvid}/playurl?cid=${encodeURIComponent(cid)}`
+    : `/api/video/${bvid}/playurl`;
 
-      const j = await r.json();
-      if (!j.url) throw new Error('empty URL');
+  const opts = { cache: 'no-store', credentials: 'same-origin' };
+  if (signal) opts.signal = signal;
 
-      video.src = j.url;
-      video.dataset.bvid = bvid;
-      video.dataset.cid = cid ? String(cid) : '';
-      video.load();
+  const r = await fetch(url, opts);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const j = await r.json();
+  if (!j.url) throw new Error('empty URL');
+  return j.url;
+}
 
-      await video.play();
-      if (unmuteBtn) unmuteBtn.classList.remove('hidden');
-    } catch (e) {
-      if (attempt < 2) return playStream(bvid, cid, attempt + 1);
-      console.warn('playback failed:', e);
+async function attachAndPlay(url, bvid, cid) {
+  if (!video) throw new Error('missing video element');
+
+  // reset previous state/errors
+  try { video.pause(); } catch {}
+  video.removeAttribute('src');
+  video.load();
+
+  video.src = url;
+  video.dataset.bvid = bvid;
+  video.dataset.cid = cid ? String(cid) : '';
+  video.load();
+
+  // play() returns a Promise; rejection means "this attempt failed"
+  const p = video.play();
+  if (p && typeof p.then === 'function') await p;
+
+  if (unmuteBtn) unmuteBtn.classList.remove('hidden');
+}
+
+async function playStream(bvid, cid = null, options = {}) {
+  if (!video || !bvid) return;
+
+  const newSession = options.newSession !== false;   // default true for user actions
+  const quiet = Boolean(options.quiet);              // true for background retries
+  const maxAttempts = Number(options.maxAttempts || 6);
+
+  const sessionId = newSession ? (++activePlaySessionId) : activePlaySessionId;
+  if (!sessionId) return;
+
+  // prevent parallel retry loops for the same session
+  if (runningSessionId === sessionId) return;
+  runningSessionId = sessionId;
+
+  let lastErr = null;
+
+  try {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      // cancelled by a newer user action
+      if (sessionId !== activePlaySessionId) return;
+
+      const AC = window.AbortController;
+      const ctrl = AC ? new AC() : null;
+
+      try {
+        const playUrl = await fetchPlayUrl(bvid, cid, ctrl ? ctrl.signal : null);
+
+        if (sessionId !== activePlaySessionId) return;
+
+        await attachAndPlay(playUrl, bvid, cid);
+        return; // success
+      } catch (e) {
+        lastErr = e;
+
+        // cleanup media element so next attempt starts fresh
+        try { video.pause(); } catch {}
+        video.removeAttribute('src');
+        video.load();
+
+        // silent backoff before the next attempt
+        if (attempt < maxAttempts) {
+          await sleep(200 * attempt);
+          continue;
+        }
+      }
+    }
+
+    // only show user-visible error once per session, and only for non-quiet runs
+    if (!quiet && alertedSessionId !== sessionId) {
+      alertedSessionId = sessionId;
       alert('Unable to start this video. Try another one.');
+    } else {
+      console.warn('Playback failed after all attempts:', lastErr);
+    }
+    } finally {
+      if (runningSessionId === sessionId) runningSessionId = 0;
     }
   }
 
@@ -177,93 +251,113 @@
   }
 
   function renderPlaylist(meta, startIndex) {
-    const ui = ensurePlaylistUI();
+  const ui = ensurePlaylistUI();
 
-    playlistMeta = meta || null;
-    playlistItems = (meta && Array.isArray(meta.items)) ? meta.items : [];
-    playlistIndex = Math.max(0, Math.min(startIndex || 0, Math.max(0, playlistItems.length - 1)));
+  playlistMeta = (meta && typeof meta === 'object') ? meta : null;
+  playlistItems = (playlistMeta && Array.isArray(playlistMeta.items)) ? playlistMeta.items : [];
 
-    if (!ui) return;
+  const maxIdx = Math.max(0, playlistItems.length - 1);
+  const idx0 = Number.isFinite(startIndex) ? startIndex : 0;
+  playlistIndex = Math.max(0, Math.min(idx0, maxIdx));
 
-    if (playlistItems.length <= 1) {
-      hidePlaylistUI();
-      return;
-    }
+  if (!ui) return;
 
-    ui.titleEl.textContent = meta.title || '';
-    ui.itemsEl.innerHTML = '';
-
-    playlistItems.forEach((item, idx) => {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'px-3 py-1 rounded border border-gray-300 bg-white text-gray-800 text-sm whitespace-nowrap flex-shrink-0 hover:bg-gray-50';
-      btn.textContent = (meta.type === 'pages' && item.page) ? `P${item.page}` : `${idx + 1}`;
-      btn.title = item.title || '';
-      btn.addEventListener('click', () => selectPlaylistIndex(idx));
-      ui.itemsEl.appendChild(btn);
-    });
-
-    ui.bar.classList.remove('hidden');
-    updatePlaylistHighlight();
+  if (playlistItems.length <= 1) {
+    hidePlaylistUI();
+    return;
   }
 
-  grid.addEventListener('click', async (ev) => {
-    const card = ev.target.closest('[data-bvid]');
-    if (!card || !card.dataset.bvid) return;
+  ui.titleEl.textContent = safeText(playlistMeta.title);
+  ui.itemsEl.innerHTML = '';
 
-    document.querySelectorAll('.video-card')
-      .forEach(el => el.classList.remove('ring', 'ring-blue-400'));
-    card.classList.add('ring', 'ring-blue-400');
+  const type = playlistMeta.type;
 
-    const clickedBvid = card.dataset.bvid;
+  playlistItems.forEach((item, idx) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className =
+      'px-3 py-1 rounded border border-gray-300 bg-white text-gray-800 text-sm whitespace-nowrap flex-shrink-0 hover:bg-gray-50';
 
-    if (wrapper) wrapper.classList.remove('hidden');
-    if (wrapper && window.innerWidth < 768) wrapper.scrollIntoView({ behavior: 'smooth' });
+    const pageNo = item && item.page;
+    btn.textContent = (type === 'pages' && pageNo) ? `P${pageNo}` : `${idx + 1}`;
+    btn.title = safeText(item && item.title);
 
-    try {
-      const meta = await fetchPlaylist(clickedBvid);
-      const items = Array.isArray(meta.items) ? meta.items : [];
+    btn.addEventListener('click', () => selectPlaylistIndex(idx));
+    ui.itemsEl.appendChild(btn);
+  });
 
-      let startIndex = 0;
+  ui.bar.classList.remove('hidden');
+  updatePlaylistHighlight();
+}
+
+grid.addEventListener('click', async (ev) => {
+  const card = ev.target.closest('[data-bvid]');
+  if (!card || !card.dataset.bvid) return;
+
+  document.querySelectorAll('.video-card')
+    .forEach(el => el.classList.remove('ring', 'ring-blue-400'));
+  card.classList.add('ring', 'ring-blue-400');
+
+  const clickedBvid = card.dataset.bvid;
+
+  if (wrapper) wrapper.classList.remove('hidden');
+  if (wrapper && window.innerWidth < 768) wrapper.scrollIntoView({ behavior: 'smooth' });
+
+  try {
+    const meta = await fetchPlaylist(clickedBvid);
+    const items = (meta && Array.isArray(meta.items)) ? meta.items : [];
+
+    let startIndex = 0;
+    if (items.length) {
       const found = items.findIndex(it => it && it.bvid === clickedBvid);
-      if (found >= 0) startIndex = found;
+      startIndex = (found >= 0) ? found : 0;
+    }
 
-      renderPlaylist(meta, startIndex);
+    renderPlaylist(meta, startIndex);
 
-      if (items[startIndex]) {
-        await playStream(items[startIndex].bvid, items[startIndex].cid);
-      } else {
-        hidePlaylistUI();
-        await playStream(clickedBvid, null);
-      }
-    } catch (e) {
+    const target = items[startIndex];
+    if (target && target.bvid) {
+      await playStream(target.bvid, target.cid ?? null, { newSession: true });
+    } else {
+      hidePlaylistUI();
+      await playStream(clickedBvid, null, { newSession: true });
+    }
+  } catch (e) {
       console.warn('playlist load failed:', e);
       hidePlaylistUI();
-      await playStream(clickedBvid, null);
+      await playStream(clickedBvid, null, { newSession: true });
     }
   });
 
+  let lastRetryAt = 0;
+
   function handleRetryEvent(e) {
+    const now = Date.now();
+    if (now - lastRetryAt < 800) return; // throttle
+    lastRetryAt = now;
+
     let bvid = video ? (video.dataset.bvid || '') : '';
     let cid = (video && video.dataset.cid) ? parseInt(video.dataset.cid, 10) : null;
     if (cid != null && Number.isNaN(cid)) cid = null;
 
     const d = e && e.detail;
-    if (typeof d === 'string') {
-      bvid = d || bvid;
-    } else if (d && typeof d === 'object') {
+    if (d && typeof d === 'object') {
       if (typeof d.bvid === 'string') bvid = d.bvid || bvid;
       if (typeof d.cid === 'number') cid = d.cid;
       if (typeof d.cid === 'string' && d.cid) {
         const n = parseInt(d.cid, 10);
         if (!Number.isNaN(n)) cid = n;
       }
+    } else if (typeof d === 'string') {
+      bvid = d || bvid;
     }
 
-    if (bvid) playStream(bvid, cid, 1);
+    if (!bvid) return;
+
+    // background retry: quiet, and do NOT create a new session
+    playStream(bvid, cid, { newSession: false, quiet: true, maxAttempts: 6 });
   }
 
-  document.addEventListener('video-retry', handleRetryEvent);
   document.addEventListener('video-retry', handleRetryEvent);
 
   if (closeBtn) closeBtn.addEventListener('click', hidePlaylistUI);

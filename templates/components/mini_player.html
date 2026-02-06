@@ -103,13 +103,22 @@
     await video.play().catch(() => {});
   });
 
-  video.addEventListener('error', () => {
-    const bvid = video.dataset.bvid;
-    if (!bvid) return;
+let lastRetryDispatchAt = 0;
 
-    document.dispatchEvent(new CustomEvent('video-retry', { detail: bvid }));
-    document.dispatchEvent(new CustomEvent('video-retry', { detail: bvid }));
-  });
+video.addEventListener('error', () => {
+  const bvid = video.dataset.bvid;
+  if (!bvid) return;
+
+  const now = Date.now();
+  if (now - lastRetryDispatchAt < 800) return; // throttle repeated error fires
+  lastRetryDispatchAt = now;
+
+  const cid = video.dataset.cid ? parseInt(video.dataset.cid, 10) : null;
+
+  document.dispatchEvent(
+    new CustomEvent('video-retry', { detail: { bvid, cid } })
+  );
+});
 
   let sleepTimeoutId  = null;
   let countdownTicker = null;
